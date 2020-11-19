@@ -1,0 +1,94 @@
+---
+title: "Untitled"
+author: "Ramzy Al-Amine"
+date: "11/19/2020"
+output: html_document
+---
+
+```{r setup, echo = FALSE, include=FALSE}
+
+library(tidyverse)
+library(nbastatR)
+library(tidymodels)
+
+# folder setup
+setwd("~/R/nba_forecasting")
+data_folder <- "data"
+src_folder <- "src"
+output_folder <- "output"
+
+# relevant files
+model_file <- file.path(src_folder, "PredictionModel.rds")
+
+# load functions 
+source(file.path(src_folder, "functions.R"))
+
+```
+
+## LIVE NBA Game Predictions
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r dataset, echo = FALSE, include = FALSE}
+
+# set date for which to predict games
+this_day <- Sys.Date() - 365
+this_season <- 2020 # indicates 2019-20 season
+
+game_ids <- game_logs(seasons = this_season, result_types = "team", season_types = "Regular Season") %>%
+  filter(dateGame <= this_day, dateGame >= this_day - 45) %>% 
+  select(idGame) %>% 
+  unique()
+
+# transform a series of Game IDs into modeling dataste
+new_games <- prep_features(game_ids, this_season) %>% 
+  mutate_if(is.logical, as.factor) %>% 
+  mutate_if(is.character, as.factor)
+
+```
+
+## Including Plots
+
+```{r predictions, echo=FALSE}
+
+# load predictive model
+pred_model <- readRDS(model_file)
+
+# predict on new data set
+predictions <- pred_model %>% 
+  predict(new_games, type = c("class"))
+
+probabilities <- readRDS(model_file) %>% 
+  predict(new_games, "prob")
+
+pred_df <- new_games %>% 
+  select(idGame, dateGame, isWin, slugTeam, slugOpponent) %>% 
+  bind_cols(predictions) %>% 
+  bind_cols(probabilities) %>% 
+  mutate(correct = case_when(isWin == .pred_class ~ "Correct", TRUE ~ "Incorrect")) 
+
+pred_df
+
+```
+
+
+```{r}
+
+# analyze overall performance
+pred_df %>%
+  count(correct) %>%
+  mutate(pct = n / sum(n))
+
+# analyze performance for close calls
+close_calls <- (.25:.75)
+pred_df %>%
+  filter(between(.pred_TRUE, 0.25, 0.75)) %>%
+  count(correct) %>%
+  mutate(pct = n / sum(n))
+
+plot_accuracy(pred_df)
+
+```
+
